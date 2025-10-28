@@ -144,24 +144,26 @@ export default function Home() {
   };
 
   // Google AI API 호환 스키마로 변환 (JSON Schema 메타데이터 제거)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sanitizeSchemaForGemini = (schema: any): any => {
     if (!schema || typeof schema !== 'object') {
       return schema;
     }
 
-    // 배열 처리
+    // 배열 처리 - 모든 요소에 대해 재귀 처리
     if (Array.isArray(schema)) {
       return schema.map(item => sanitizeSchemaForGemini(item));
     }
 
     // 객체 복사 및 금지된 필드 제거
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sanitized: any = {};
     for (const key in schema) {
-      // $schema와 additionalProperties 제거
+      // $schema와 additionalProperties 제거 (Gemini API가 지원하지 않음)
       if (key === '$schema' || key === 'additionalProperties') {
         continue;
       }
-      // 중첩된 객체 재귀 처리
+      // 모든 중첩된 객체와 배열에 대해 재귀 처리
       sanitized[key] = sanitizeSchemaForGemini(schema[key]);
     }
     return sanitized;
