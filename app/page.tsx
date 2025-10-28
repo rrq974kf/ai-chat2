@@ -143,6 +143,30 @@ export default function Home() {
     );
   };
 
+  // Google AI API 호환 스키마로 변환 (JSON Schema 메타데이터 제거)
+  const sanitizeSchemaForGemini = (schema: any): any => {
+    if (!schema || typeof schema !== 'object') {
+      return schema;
+    }
+
+    // 배열 처리
+    if (Array.isArray(schema)) {
+      return schema.map(item => sanitizeSchemaForGemini(item));
+    }
+
+    // 객체 복사 및 금지된 필드 제거
+    const sanitized: any = {};
+    for (const key in schema) {
+      // $schema와 additionalProperties 제거
+      if (key === '$schema' || key === 'additionalProperties') {
+        continue;
+      }
+      // 중첩된 객체 재귀 처리
+      sanitized[key] = sanitizeSchemaForGemini(schema[key]);
+    }
+    return sanitized;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -185,7 +209,7 @@ export default function Home() {
           mcpTools.push({
             name: tool.name,
             description: tool.description || tool.name,
-            parameters: tool.inputSchema,
+            parameters: sanitizeSchemaForGemini(tool.inputSchema),
           });
         }
       }
