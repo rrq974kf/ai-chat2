@@ -138,8 +138,8 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isInitialized) return;
 
-    const verifyConnections = async () => {
-      const connectedServers = connections.filter(c => c.connected);
+    const verifyConnections = async (currentConnections: MCPConnectionStatus[]) => {
+      const connectedServers = currentConnections.filter(c => c.connected);
       
       for (const conn of connectedServers) {
         try {
@@ -189,8 +189,8 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    verifyConnections();
-  }, [isInitialized]);
+    verifyConnections(connections);
+  }, [isInitialized, connections]);
 
   const addServer = useCallback((server: Omit<MCPServerConfig, 'id'>) => {
     const newServer: MCPServerConfig = {
@@ -204,6 +204,38 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
     setServers(prev =>
       prev.map(server => (server.id === id ? { ...server, ...updates } : server))
     );
+  }, []);
+
+  const isServerConnected = useCallback(
+    (id: string) => {
+      const status = connections.find(c => c.serverId === id);
+      return status?.connected ?? false;
+    },
+    [connections]
+  );
+
+  const disconnectServer = useCallback(async (id: string) => {
+    try {
+      const response = await fetch('/api/mcp/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId: id }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to disconnect');
+      }
+
+      // 연결 상태 업데이트
+      setConnections(prev =>
+        prev.map(conn =>
+          conn.serverId === id ? { ...conn, connected: false } : conn
+        )
+      );
+    } catch (error) {
+      console.error('Failed to disconnect server:', error);
+      throw error;
+    }
   }, []);
 
   const removeServer = useCallback(async (id: string) => {
@@ -231,6 +263,48 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
       newCache.delete(id);
       return newCache;
     });
+  }, [isServerConnected, disconnectServer]);
+
+  const refreshServerData = useCallback(async (serverId: string, currentConnections: MCPConnectionStatus[]) => {
+    const connected = currentConnections.find(c => c.serverId === serverId)?.connected;
+    if (!connected) {
+      return;
+    }
+
+    try {
+      // 도구 목록 가져오기
+      const toolsRes = await fetch(`/api/mcp/tools?serverId=${serverId}`);
+      if (!toolsRes.ok) {
+        throw new Error('Failed to fetch tools');
+      }
+      const tools = await toolsRes.json();
+      setToolsCache(prev => new Map(prev).set(serverId, tools));
+
+      // 프롬프트 목록 가져오기
+      const promptsRes = await fetch(`/api/mcp/prompts?serverId=${serverId}`);
+      if (promptsRes.ok) {
+        const prompts = await promptsRes.json();
+        setPromptsCache(prev => new Map(prev).set(serverId, prompts));
+      }
+
+      // 리소스 목록 가져오기
+      const resourcesRes = await fetch(`/api/mcp/resources?serverId=${serverId}`);
+      if (resourcesRes.ok) {
+        const resources = await resourcesRes.json();
+        setResourcesCache(prev => new Map(prev).set(serverId, resources));
+      }
+    } catch (error) {
+      console.error('Failed to refresh server data:', error);
+      // 에러 발생 시 연결 상태를 false로 업데이트
+      setConnections(prev =>
+        prev.map(c =>
+          c.serverId === serverId
+            ? { ...c, connected: false, error: 'Failed to fetch server data' }
+            : c
+        )
+      );
+      throw error;
+    }
   }, []);
 
   const connectServer = useCallback(async (id: string) => {
@@ -276,8 +350,10 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
         ];
       });
 
-      // 연결 후 데이터 새로고침
-      await refreshServerData(id);
+      // 연결 후 데이터 새로고침 (상태 업데이트 후 실행하기 위해 지연)
+      setTimeout(() => {
+        refreshServerData(id, connections);
+      }, 100);
     } catch (error) {
       console.error('Failed to connect server:', error);
       
@@ -296,39 +372,7 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
       
       throw error;
     }
-  }, [servers]);
-
-  const disconnectServer = useCallback(async (id: string) => {
-    try {
-      const response = await fetch('/api/mcp/disconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverId: id }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to disconnect');
-      }
-
-      // 연결 상태 업데이트
-      setConnections(prev =>
-        prev.map(conn =>
-          conn.serverId === id ? { ...conn, connected: false } : conn
-        )
-      );
-    } catch (error) {
-      console.error('Failed to disconnect server:', error);
-      throw error;
-    }
-  }, []);
-
-  const isServerConnected = useCallback(
-    (id: string) => {
-      const status = connections.find(c => c.serverId === id);
-      return status?.connected ?? false;
-    },
-    [connections]
-  );
+  }, [servers, connections, refreshServerData]);
 
   const getConnectionStatus = useCallback(
     (id: string) => {
@@ -336,48 +380,6 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
     },
     [connections]
   );
-
-  const refreshServerData = useCallback(async (serverId: string) => {
-    const connected = connections.find(c => c.serverId === serverId)?.connected;
-    if (!connected) {
-      return;
-    }
-
-    try {
-      // 도구 목록 가져오기
-      const toolsRes = await fetch(`/api/mcp/tools?serverId=${serverId}`);
-      if (!toolsRes.ok) {
-        throw new Error('Failed to fetch tools');
-      }
-      const tools = await toolsRes.json();
-      setToolsCache(prev => new Map(prev).set(serverId, tools));
-
-      // 프롬프트 목록 가져오기
-      const promptsRes = await fetch(`/api/mcp/prompts?serverId=${serverId}`);
-      if (promptsRes.ok) {
-        const prompts = await promptsRes.json();
-        setPromptsCache(prev => new Map(prev).set(serverId, prompts));
-      }
-
-      // 리소스 목록 가져오기
-      const resourcesRes = await fetch(`/api/mcp/resources?serverId=${serverId}`);
-      if (resourcesRes.ok) {
-        const resources = await resourcesRes.json();
-        setResourcesCache(prev => new Map(prev).set(serverId, resources));
-      }
-    } catch (error) {
-      console.error('Failed to refresh server data:', error);
-      // 에러 발생 시 연결 상태를 false로 업데이트
-      setConnections(prev =>
-        prev.map(c =>
-          c.serverId === serverId
-            ? { ...c, connected: false, error: 'Failed to fetch server data' }
-            : c
-        )
-      );
-      throw error;
-    }
-  }, [connections]);
 
   const exportConfig = useCallback(() => {
     const config = {
@@ -432,7 +434,7 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
     getConnectionStatus,
     exportConfig,
     importConfig,
-    refreshServerData,
+    refreshServerData: (serverId: string) => refreshServerData(serverId, connections),
     toolsCache,
     promptsCache,
     resourcesCache,

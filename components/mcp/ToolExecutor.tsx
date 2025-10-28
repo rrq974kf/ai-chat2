@@ -14,7 +14,7 @@ export default function ToolExecutor({ tool, serverId, serverName }: ToolExecuto
   const [isExpanded, setIsExpanded] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [args, setArgs] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleExecute = async () => {
@@ -92,7 +92,7 @@ export default function ToolExecutor({ tool, serverId, serverName }: ToolExecuto
           {Object.keys(properties).length > 0 ? (
             <div className="space-y-3">
               <h5 className="font-medium text-gray-900 dark:text-white">Parameters</h5>
-              {Object.entries(properties).map(([key, schema]: [string, any]) => (
+              {Object.entries(properties).map(([key, schema]: [string, { description?: string; type?: string }]) => (
                 <div key={key}>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     {key}

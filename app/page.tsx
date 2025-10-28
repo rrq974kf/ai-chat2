@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Send, Loader2, AlertCircle } from 'lucide-react';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
@@ -20,7 +20,7 @@ export default function Home() {
 
   // 현재 채팅방의 메시지 가져오기
   const currentChat = chats.find(chat => chat.id === currentChatId);
-  const messages = currentChat?.messages || [];
+  const messages = useMemo(() => currentChat?.messages || [], [currentChat?.messages]);
 
   // 채팅방 제목 생성 헬퍼
   const generateTitle = (firstMessage: string) => {
@@ -113,14 +113,14 @@ export default function Home() {
     }
   };
 
-  // 채팅방 제목 업데이트
-  const updateChatTitle = (id: string, title: string) => {
-    setChats(prev =>
-      prev.map(chat =>
-        chat.id === id ? { ...chat, title, updatedAt: Date.now() } : chat
-      )
-    );
-  };
+  // 채팅방 제목 업데이트 (미사용 - 향후 사용 예정)
+  // const updateChatTitle = (id: string, title: string) => {
+  //   setChats(prev =>
+  //     prev.map(chat =>
+  //       chat.id === id ? { ...chat, title, updatedAt: Date.now() } : chat
+  //     )
+  //   );
+  // };
 
   // 현재 채팅방 메시지 업데이트
   const updateCurrentChatMessages = (newMessages: Message[]) => {
@@ -146,7 +146,7 @@ export default function Home() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit(e as any);
+      handleSubmit(e as unknown as React.FormEvent);
     }
   };
 
@@ -177,6 +177,7 @@ export default function Home() {
         .filter((c) => c.connected)
         .map((c) => c.serverId);
       
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mcpTools: any[] = [];
       for (const serverId of connectedServerIds) {
         const tools = toolsCache.get(serverId) || [];
@@ -206,6 +207,7 @@ export default function Home() {
           console.log(`🤖 AI 모델 시도 (${i + 1}/${modelNames.length}): ${modelName}`);
           
           // Gemini 모델 설정 (도구가 있으면 함께 전달)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const modelConfig: any = { model: modelName };
           
           if (mcpTools.length > 0) {
@@ -220,8 +222,8 @@ export default function Home() {
           
           console.log(`✅ AI 모델 성공: ${modelName}`);
           break; // 성공하면 루프 종료
-        } catch (modelError: any) {
-          const errorMsg = modelError.message || '';
+        } catch (modelError: unknown) {
+          const errorMsg = modelError instanceof Error ? modelError.message : '';
           console.error(`❌ AI 모델 실패 (${i + 1}/${modelNames.length}): ${modelName}`, errorMsg);
           
           // 503 오류가 아니거나 마지막 모델이면 즉시 throw

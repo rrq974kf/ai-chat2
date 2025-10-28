@@ -7,7 +7,7 @@ import type { MCPServerConfig, MCPTool, MCPPrompt, MCPResource } from '@/types/m
 class MCPClientManager {
   private static instance: MCPClientManager;
   private clients: Map<string, Client> = new Map();
-  private transports: Map<string, any> = new Map();
+  private transports: Map<string, unknown> = new Map();
 
   private constructor() {}
 
@@ -124,9 +124,9 @@ class MCPClientManager {
       this.clients.delete(serverId);
     }
 
-    if (transport && typeof transport.close === 'function') {
+    if (transport && typeof (transport as { close?: () => Promise<void> }).close === 'function') {
       try {
-        await transport.close();
+        await (transport as { close: () => Promise<void> }).close();
       } catch (error) {
         console.error(`Error closing transport for ${serverId}:`, error);
       }
@@ -203,7 +203,7 @@ class MCPClientManager {
   async getAllTools(): Promise<Array<MCPTool & { serverId: string }>> {
     const allTools: Array<MCPTool & { serverId: string }> = [];
 
-    for (const [serverId, client] of this.clients.entries()) {
+    for (const serverId of this.clients.keys()) {
       try {
         const tools = await this.listTools(serverId);
         allTools.push(...tools.map(tool => ({ ...tool, serverId })));

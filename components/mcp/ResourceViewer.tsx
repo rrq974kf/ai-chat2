@@ -17,7 +17,7 @@ export default function ResourceViewer({
 }: ResourceViewerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [content, setContent] = useState<any>(null);
+  const [content, setContent] = useState<{ contents?: Array<{ mimeType?: string; text?: string; blob?: string }> } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleReadResource = async () => {
@@ -119,7 +119,7 @@ export default function ResourceViewer({
                 </button>
               </div>
               
-              {content.contents?.map((item: any, idx: number) => (
+              {content.contents?.map((item, idx: number) => (
                 <div key={idx} className="space-y-2">
                   {item.mimeType && (
                     <div className="text-xs text-gray-500 dark:text-gray-400">

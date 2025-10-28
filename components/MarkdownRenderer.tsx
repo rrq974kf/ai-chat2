@@ -61,7 +61,7 @@ SyntaxHighlighter.registerLanguage('kotlin', kotlin);
 SyntaxHighlighter.registerLanguage('kt', kotlin);
 
 interface CodeBlockProps {
-  node?: any;
+  node?: unknown;
   inline?: boolean;
   className?: string;
   children?: React.ReactNode;
@@ -121,6 +121,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         code: CodeBlock as any,
         p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
         ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,

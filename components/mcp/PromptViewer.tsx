@@ -15,7 +15,7 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [args, setArgs] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<{ description?: string; messages?: Array<{ role: string; content: { text: string } }> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
@@ -156,7 +156,7 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
                 </div>
               )}
               <div className="space-y-3">
-                {result.messages?.map((msg: any, idx: number) => (
+                {result.messages?.map((msg, idx: number) => (
                   <div
                     key={idx}
                     className="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"

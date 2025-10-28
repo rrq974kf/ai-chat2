@@ -499,7 +499,7 @@ export default function MCPManagementPage() {
                     등록된 MCP 서버가 없습니다.
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-                    "서버 추가" 버튼을 클릭하여 시작하세요.
+                    &quot;서버 추가&quot; 버튼을 클릭하여 시작하세요.
                   </p>
                 </div>
               ) : (
