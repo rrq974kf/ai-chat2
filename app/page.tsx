@@ -6,6 +6,7 @@ import { Send, Loader2, AlertCircle } from 'lucide-react';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import Sidebar from '@/components/Sidebar';
 import { Chat, Message } from '@/types/chat';
+import { useMCP } from '@/lib/MCPContext';
 
 export default function Home() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -15,6 +16,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { toolsCache, connections } = useMCP();
 
   // 현재 채팅방의 메시지 가져오기
   const currentChat = chats.find(chat => chat.id === currentChatId);
@@ -168,7 +170,34 @@ export default function Home() {
 
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-001' });
+      
+      // 연결된 MCP 서버의 도구 수집
+      const connectedServerIds = connections
+        .filter((c) => c.connected)
+        .map((c) => c.serverId);
+      
+      const mcpTools: any[] = [];
+      for (const serverId of connectedServerIds) {
+        const tools = toolsCache.get(serverId) || [];
+        for (const tool of tools) {
+          mcpTools.push({
+            name: tool.name,
+            description: tool.description || tool.name,
+            parameters: tool.inputSchema,
+          });
+        }
+      }
+
+      // Gemini 모델 설정 (도구가 있으면 함께 전달)
+      const modelConfig: any = { model: 'gemini-2.0-flash-exp' };
+      
+      if (mcpTools.length > 0) {
+        modelConfig.tools = [{
+          functionDeclarations: mcpTools,
+        }];
+      }
+
+      const model = genAI.getGenerativeModel(modelConfig);
 
       // 채팅 기록을 Gemini API 형식으로 변환
       const history = messages.map(msg => ({
@@ -177,19 +206,72 @@ export default function Home() {
       }));
 
       const chat = model.startChat({ history });
-      const result = await chat.sendMessageStream(userMessage.content);
+      const result = await chat.sendMessage(userMessage.content);
 
-      // 스트리밍 응답 처리
-      let fullResponse = '';
-      updateCurrentChatMessages([...newMessages, { role: 'assistant', content: '' }]);
+      // Function call 확인
+      const response = result.response;
+      const functionCalls = response.functionCalls();
 
-      for await (const chunk of result.stream) {
-        const chunkText = chunk.text();
-        fullResponse += chunkText;
-        
+      if (functionCalls && functionCalls.length > 0) {
+        // Function call이 있는 경우
+        let toolResultsText = '\n\n[도구 실행 결과]\n';
+
+        for (const fc of functionCalls) {
+          try {
+            // 도구가 속한 서버 찾기
+            let targetServerId = '';
+            for (const serverId of connectedServerIds) {
+              const tools = toolsCache.get(serverId) || [];
+              if (tools.some((t) => t.name === fc.name)) {
+                targetServerId = serverId;
+                break;
+              }
+            }
+
+            if (!targetServerId) {
+              toolResultsText += `\n- ${fc.name}: 도구를 찾을 수 없습니다.\n`;
+              continue;
+            }
+
+            // MCP 도구 실행
+            const executeRes = await fetch('/api/mcp/tools/execute', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                serverId: targetServerId,
+                toolName: fc.name,
+                arguments: fc.args,
+              }),
+            });
+
+            const executeData = await executeRes.json();
+
+            if (!executeRes.ok || executeData.isError) {
+              toolResultsText += `\n- ${fc.name}: 오류 - ${executeData.error || '실행 실패'}\n`;
+            } else {
+              // 도구 실행 결과를 텍스트로 변환
+              const resultText = executeData.content
+                ?.map((c: any) => c.text || JSON.stringify(c))
+                .join('\n') || JSON.stringify(executeData);
+              toolResultsText += `\n- ${fc.name}: ${resultText}\n`;
+            }
+          } catch (err) {
+            toolResultsText += `\n- ${fc.name}: 실행 중 오류 발생\n`;
+          }
+        }
+
+        // 도구 실행 결과를 포함한 최종 응답
+        const finalText = (response.text() || '') + toolResultsText;
         updateCurrentChatMessages([
           ...newMessages,
-          { role: 'assistant', content: fullResponse }
+          { role: 'assistant', content: finalText },
+        ]);
+      } else {
+        // 일반 텍스트 응답
+        const responseText = response.text();
+        updateCurrentChatMessages([
+          ...newMessages,
+          { role: 'assistant', content: responseText },
         ]);
       }
     } catch (err) {
@@ -198,7 +280,7 @@ export default function Home() {
       
       // 오류 발생 시 빈 assistant 메시지 제거
       const currentMessages = chats.find(c => c.id === currentChatId)?.messages || [];
-      if (currentMessages[currentMessages.length - 1]?.content === '') {
+      if (currentMessages.length > messages.length) {
         updateCurrentChatMessages(currentMessages.slice(0, -1));
       }
     } finally {

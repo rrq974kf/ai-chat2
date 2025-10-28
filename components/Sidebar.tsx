@@ -1,7 +1,9 @@
 'use client';
 
-import { MessageSquarePlus, Trash2, Menu, X } from 'lucide-react';
+import { MessageSquarePlus, Trash2, Menu, X, Settings } from 'lucide-react';
 import { Chat } from '@/types/chat';
+import { useMCP } from '@/lib/MCPContext';
+import Link from 'next/link';
 
 interface SidebarProps {
   chats: Chat[];
@@ -22,6 +24,9 @@ export default function Sidebar({
   isOpen,
   onToggle,
 }: SidebarProps) {
+  const { connections } = useMCP();
+  const connectedCount = connections.filter((c) => c.connected).length;
+
   const formatTime = (timestamp: number) => {
     const now = Date.now();
     const diff = now - timestamp;
@@ -64,7 +69,7 @@ export default function Sidebar({
         </div>
 
         {/* 새 채팅 버튼 */}
-        <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+        <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
           <button
             onClick={onCreateChat}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
@@ -72,6 +77,20 @@ export default function Sidebar({
             <MessageSquarePlus className="w-5 h-5" />
             새 채팅
           </button>
+          <Link
+            href="/mcp"
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              MCP 서버
+            </div>
+            {connectedCount > 0 && (
+              <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full">
+                {connectedCount}
+              </span>
+            )}
+          </Link>
         </div>
 
         {/* 채팅방 목록 */}
