@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Eye, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Eye, Loader2, ChevronDown, ChevronUp, Copy, Check } from 'lucide-react';
 import type { MCPPrompt } from '@/types/mcp';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 
 interface PromptViewerProps {
   prompt: MCPPrompt;
@@ -16,6 +17,7 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
   const [args, setArgs] = useState<Record<string, string>>({});
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const handleGetPrompt = async () => {
     setIsLoading(true);
@@ -44,6 +46,16 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
       setError(err instanceof Error ? err.message : 'Failed to get prompt');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCopy = async (text: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
   };
 
@@ -76,7 +88,7 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
           {/* 프롬프트 인자 */}
           {prompt.arguments && prompt.arguments.length > 0 ? (
             <div className="space-y-3">
-              <h5 className="font-medium text-gray-900 dark:text-white">Arguments</h5>
+              <h5 className="font-medium text-gray-900 dark:text-white">입력 인자</h5>
               {prompt.arguments.map((arg) => (
                 <div key={arg.name}>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -93,13 +105,14 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
                     value={args[arg.name] || ''}
                     onChange={(e) => setArgs({ ...args, [arg.name]: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder={`${arg.name} 입력...`}
                   />
                 </div>
               ))}
             </div>
           ) : (
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              No arguments required
+              필요한 인자가 없습니다
             </p>
           )}
 
@@ -112,12 +125,12 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Loading...
+                프롬프트 가져오는 중...
               </>
             ) : (
               <>
                 <Eye className="w-4 h-4" />
-                Get Prompt
+                프롬프트 확인
               </>
             )}
           </button>
@@ -131,24 +144,53 @@ export default function PromptViewer({ prompt, serverId, serverName }: PromptVie
 
           {/* 결과 표시 */}
           {result && (
-            <div className="space-y-2">
-              <h5 className="font-medium text-gray-900 dark:text-white">Prompt Content</h5>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h5 className="font-medium text-gray-900 dark:text-white">프롬프트 내용</h5>
+              </div>
               {result.description && (
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {result.description}
-                </p>
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <p className="text-sm text-blue-800 dark:text-blue-200">
+                    {result.description}
+                  </p>
+                </div>
               )}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {result.messages?.map((msg: any, idx: number) => (
                   <div
                     key={idx}
-                    className="p-3 bg-gray-100 dark:bg-gray-900 rounded-lg"
+                    className="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
                   >
-                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                      {msg.role}
+                    <div className="flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 text-xs font-medium rounded ${
+                          msg.role === 'user' 
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        }`}>
+                          {msg.role === 'user' ? '사용자' : '어시스턴트'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleCopy(msg.content.text, idx)}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+                        title="복사"
+                      >
+                        {copiedIndex === idx ? (
+                          <>
+                            <Check className="w-3 h-3" />
+                            복사됨
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            복사
+                          </>
+                        )}
+                      </button>
                     </div>
-                    <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
-                      {msg.content.text}
+                    <div className="p-4">
+                      <MarkdownRenderer content={msg.content.text} />
                     </div>
                   </div>
                 ))}

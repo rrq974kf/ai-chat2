@@ -104,8 +104,13 @@ export default function ServerCard({
           </div>
 
           {status?.error && (
-            <div className="mt-2 text-sm text-red-600 dark:text-red-400">
-              {status.error}
+            <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <div className="flex items-start gap-2">
+                <span className="text-red-600 dark:text-red-400 font-semibold shrink-0">⚠️</span>
+                <div className="text-sm text-red-800 dark:text-red-200 whitespace-pre-line">
+                  {status.error}
+                </div>
+              </div>
             </div>
           )}
         </div>

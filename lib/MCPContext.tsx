@@ -32,6 +32,26 @@ const MCPContext = createContext<MCPContextType | undefined>(undefined);
 
 const STORAGE_KEY_SERVERS = 'mcp-servers';
 const STORAGE_KEY_CONNECTIONS = 'mcp-connections';
+const STORAGE_KEY_TOOLS_CACHE = 'mcp-tools-cache';
+const STORAGE_KEY_PROMPTS_CACHE = 'mcp-prompts-cache';
+const STORAGE_KEY_RESOURCES_CACHE = 'mcp-resources-cache';
+
+// Map <-> Object 변환 헬퍼 함수
+const mapToObject = <T,>(map: Map<string, T>): Record<string, T> => {
+  const obj: Record<string, T> = {};
+  map.forEach((value, key) => {
+    obj[key] = value;
+  });
+  return obj;
+};
+
+const objectToMap = <T,>(obj: Record<string, T>): Map<string, T> => {
+  const map = new Map<string, T>();
+  Object.entries(obj).forEach(([key, value]) => {
+    map.set(key, value);
+  });
+  return map;
+};
 
 export function MCPProvider({ children }: { children: React.ReactNode }) {
   const [servers, setServers] = useState<MCPServerConfig[]>([]);
@@ -39,22 +59,46 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
   const [toolsCache, setToolsCache] = useState<Map<string, MCPTool[]>>(new Map());
   const [promptsCache, setPromptsCache] = useState<Map<string, MCPPrompt[]>>(new Map());
   const [resourcesCache, setResourcesCache] = useState<Map<string, MCPResource[]>>(new Map());
+  const [isInitialized, setIsInitialized] = useState(false);
 
-  // LocalStorage에서 서버 설정 로드
+  // LocalStorage에서 서버 설정 및 캐시 로드
   useEffect(() => {
-    try {
-      const savedServers = localStorage.getItem(STORAGE_KEY_SERVERS);
-      const savedConnections = localStorage.getItem(STORAGE_KEY_CONNECTIONS);
+    const initializeData = async () => {
+      try {
+        // 서버 및 연결 상태 복원
+        const savedServers = localStorage.getItem(STORAGE_KEY_SERVERS);
+        const savedConnections = localStorage.getItem(STORAGE_KEY_CONNECTIONS);
 
-      if (savedServers) {
-        setServers(JSON.parse(savedServers));
+        if (savedServers) {
+          setServers(JSON.parse(savedServers));
+        }
+        if (savedConnections) {
+          setConnections(JSON.parse(savedConnections));
+        }
+
+        // 캐시 복원
+        const savedToolsCache = localStorage.getItem(STORAGE_KEY_TOOLS_CACHE);
+        const savedPromptsCache = localStorage.getItem(STORAGE_KEY_PROMPTS_CACHE);
+        const savedResourcesCache = localStorage.getItem(STORAGE_KEY_RESOURCES_CACHE);
+
+        if (savedToolsCache) {
+          setToolsCache(objectToMap(JSON.parse(savedToolsCache)));
+        }
+        if (savedPromptsCache) {
+          setPromptsCache(objectToMap(JSON.parse(savedPromptsCache)));
+        }
+        if (savedResourcesCache) {
+          setResourcesCache(objectToMap(JSON.parse(savedResourcesCache)));
+        }
+
+        setIsInitialized(true);
+      } catch (error) {
+        console.error('Failed to load MCP config from localStorage:', error);
+        setIsInitialized(true);
       }
-      if (savedConnections) {
-        setConnections(JSON.parse(savedConnections));
-      }
-    } catch (error) {
-      console.error('Failed to load MCP config from localStorage:', error);
-    }
+    };
+
+    initializeData();
   }, []);
 
   // 서버 목록이 변경될 때마다 저장
@@ -70,6 +114,83 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem(STORAGE_KEY_CONNECTIONS, JSON.stringify(connections));
     }
   }, [connections]);
+
+  // 캐시를 localStorage에 저장
+  useEffect(() => {
+    if (isInitialized && toolsCache.size > 0) {
+      localStorage.setItem(STORAGE_KEY_TOOLS_CACHE, JSON.stringify(mapToObject(toolsCache)));
+    }
+  }, [toolsCache, isInitialized]);
+
+  useEffect(() => {
+    if (isInitialized && promptsCache.size > 0) {
+      localStorage.setItem(STORAGE_KEY_PROMPTS_CACHE, JSON.stringify(mapToObject(promptsCache)));
+    }
+  }, [promptsCache, isInitialized]);
+
+  useEffect(() => {
+    if (isInitialized && resourcesCache.size > 0) {
+      localStorage.setItem(STORAGE_KEY_RESOURCES_CACHE, JSON.stringify(mapToObject(resourcesCache)));
+    }
+  }, [resourcesCache, isInitialized]);
+
+  // 초기화 완료 후 연결된 서버들의 데이터 재검증
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const verifyConnections = async () => {
+      const connectedServers = connections.filter(c => c.connected);
+      
+      for (const conn of connectedServers) {
+        try {
+          // 서버 데이터 가져오기 시도
+          const toolsRes = await fetch(`/api/mcp/tools?serverId=${conn.serverId}`);
+          
+          if (!toolsRes.ok) {
+            // 연결 실패 시 상태 업데이트
+            setConnections(prev =>
+              prev.map(c =>
+                c.serverId === conn.serverId
+                  ? { ...c, connected: false, error: 'Server connection lost' }
+                  : c
+              )
+            );
+            continue;
+          }
+
+          // 데이터 새로고침
+          const tools = await toolsRes.json();
+          setToolsCache(prev => new Map(prev).set(conn.serverId, tools));
+
+          const promptsRes = await fetch(`/api/mcp/prompts?serverId=${conn.serverId}`);
+          if (promptsRes.ok) {
+            const prompts = await promptsRes.json();
+            setPromptsCache(prev => new Map(prev).set(conn.serverId, prompts));
+          }
+
+          const resourcesRes = await fetch(`/api/mcp/resources?serverId=${conn.serverId}`);
+          if (resourcesRes.ok) {
+            const resources = await resourcesRes.json();
+            setResourcesCache(prev => new Map(prev).set(conn.serverId, resources));
+          }
+
+          console.log(`✅ MCP 세션 복원 성공: ${conn.serverId}`);
+        } catch (error) {
+          console.error(`❌ MCP 세션 복원 실패: ${conn.serverId}`, error);
+          // 연결 실패 시 상태 업데이트
+          setConnections(prev =>
+            prev.map(c =>
+              c.serverId === conn.serverId
+                ? { ...c, connected: false, error: 'Failed to restore session' }
+                : c
+            )
+          );
+        }
+      }
+    };
+
+    verifyConnections();
+  }, [isInitialized]);
 
   const addServer = useCallback((server: Omit<MCPServerConfig, 'id'>) => {
     const newServer: MCPServerConfig = {
@@ -127,7 +248,19 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to connect');
+        let errorMessage = error.error || 'Failed to connect';
+        
+        // 타임아웃 에러 시 더 구체적인 안내
+        if (errorMessage.includes('Request timed out') || errorMessage.includes('-32001')) {
+          errorMessage = `연결 타임아웃: MCP 서버를 시작할 수 없습니다.\n\n` +
+            `해결 방법:\n` +
+            `1. Command와 Args가 올바르게 분리되어 있는지 확인하세요.\n` +
+            `   예: Command="npx", Args="-y @modelcontextprotocol/server-time"\n` +
+            `2. Windows에서는 npx를 사용하세요 (Node.js와 함께 설치됨).\n` +
+            `3. 서버 목록에서 삭제 후 "Time Server" 프리셋 버튼으로 다시 추가해보세요.`;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       // 연결 상태 업데이트
@@ -205,17 +338,19 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
   );
 
   const refreshServerData = useCallback(async (serverId: string) => {
-    if (!isServerConnected(serverId)) {
+    const connected = connections.find(c => c.serverId === serverId)?.connected;
+    if (!connected) {
       return;
     }
 
     try {
       // 도구 목록 가져오기
       const toolsRes = await fetch(`/api/mcp/tools?serverId=${serverId}`);
-      if (toolsRes.ok) {
-        const tools = await toolsRes.json();
-        setToolsCache(prev => new Map(prev).set(serverId, tools));
+      if (!toolsRes.ok) {
+        throw new Error('Failed to fetch tools');
       }
+      const tools = await toolsRes.json();
+      setToolsCache(prev => new Map(prev).set(serverId, tools));
 
       // 프롬프트 목록 가져오기
       const promptsRes = await fetch(`/api/mcp/prompts?serverId=${serverId}`);
@@ -232,8 +367,17 @@ export function MCPProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       console.error('Failed to refresh server data:', error);
+      // 에러 발생 시 연결 상태를 false로 업데이트
+      setConnections(prev =>
+        prev.map(c =>
+          c.serverId === serverId
+            ? { ...c, connected: false, error: 'Failed to fetch server data' }
+            : c
+        )
+      );
+      throw error;
     }
-  }, [isServerConnected]);
+  }, [connections]);
 
   const exportConfig = useCallback(() => {
     const config = {

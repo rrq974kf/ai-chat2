@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamablehttp.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { MCPServerConfig, MCPTool, MCPPrompt, MCPResource } from '@/types/mcp';
 
 class MCPClientManager {
@@ -90,6 +90,23 @@ class MCPClientManager {
       console.log(`Connected to MCP server: ${config.name} (${config.id})`);
     } catch (error) {
       console.error(`Failed to connect to MCP server ${config.name}:`, error);
+      
+      // STDIO transport 에러 시 더 구체적인 정보 제공
+      if (config.transport === 'stdio') {
+        const commandStr = config.args 
+          ? `${config.command} ${config.args.join(' ')}`
+          : config.command;
+        console.error(`Command attempted: ${commandStr}`);
+        
+        // 에러 메시지 개선
+        if (error instanceof Error && error.message.includes('timed out')) {
+          throw new Error(
+            `MCP 서버 연결 타임아웃: "${commandStr}" 명령을 실행할 수 없습니다.\n` +
+            `Command와 Args가 올바르게 설정되었는지 확인해주세요.`
+          );
+        }
+      }
+      
       throw error;
     }
   }

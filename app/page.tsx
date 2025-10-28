@@ -162,7 +162,8 @@ export default function Home() {
     }
 
     const userMessage: Message = { role: 'user', content: input.trim() };
-    const newMessages = [...messages, userMessage];
+    const thinkingMessage: Message = { role: 'assistant', content: '...' };
+    const newMessages = [...messages, userMessage, thinkingMessage];
     updateCurrentChatMessages(newMessages);
     setInput('');
     setIsLoading(true);
@@ -188,25 +189,62 @@ export default function Home() {
         }
       }
 
-      // Gemini 모델 설정 (도구가 있으면 함께 전달)
-      const modelConfig: any = { model: 'gemini-2.0-flash-exp' };
-      
-      if (mcpTools.length > 0) {
-        modelConfig.tools = [{
-          functionDeclarations: mcpTools,
-        }];
-      }
-
-      const model = genAI.getGenerativeModel(modelConfig);
-
       // 채팅 기록을 Gemini API 형식으로 변환
       const history = messages.map(msg => ({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content }],
       }));
 
-      const chat = model.startChat({ history });
-      const result = await chat.sendMessage(userMessage.content);
+      // 모델 목록 (폴백 순서)
+      const modelNames = ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      let result;
+
+      // 모델을 순서대로 시도
+      for (let i = 0; i < modelNames.length; i++) {
+        const modelName = modelNames[i];
+        try {
+          console.log(`🤖 AI 모델 시도 (${i + 1}/${modelNames.length}): ${modelName}`);
+          
+          // Gemini 모델 설정 (도구가 있으면 함께 전달)
+          const modelConfig: any = { model: modelName };
+          
+          if (mcpTools.length > 0) {
+            modelConfig.tools = [{
+              functionDeclarations: mcpTools,
+            }];
+          }
+
+          const model = genAI.getGenerativeModel(modelConfig);
+          const chat = model.startChat({ history });
+          result = await chat.sendMessage(userMessage.content);
+          
+          console.log(`✅ AI 모델 성공: ${modelName}`);
+          break; // 성공하면 루프 종료
+        } catch (modelError: any) {
+          const errorMsg = modelError.message || '';
+          console.error(`❌ AI 모델 실패 (${i + 1}/${modelNames.length}): ${modelName}`, errorMsg);
+          
+          // 503 오류가 아니거나 마지막 모델이면 즉시 throw
+          const isOverloadError = errorMsg.includes('503') || errorMsg.includes('overloaded');
+          const isLastModel = i === modelNames.length - 1;
+          
+          if (!isOverloadError || isLastModel) {
+            if (isLastModel && isOverloadError) {
+              throw new Error('모든 AI 모델이 과부하 상태입니다. 잠시 후 다시 시도해주세요.');
+            }
+            throw modelError;
+          }
+          
+          // 다음 모델 시도 전 짧은 대기
+          console.log(`⏳ 1초 후 다음 모델 시도...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      // 모든 모델이 실패한 경우 (이론적으로 도달하지 않음)
+      if (!result) {
+        throw new Error('AI 응답을 생성할 수 없습니다. 다시 시도해주세요.');
+      }
 
       // Function call 확인
       const response = result.response;
@@ -214,7 +252,7 @@ export default function Home() {
 
       if (functionCalls && functionCalls.length > 0) {
         // Function call이 있는 경우
-        let toolResultsText = '\n\n[도구 실행 결과]\n';
+        let toolResultsText = '';
 
         for (const fc of functionCalls) {
           try {
@@ -229,9 +267,16 @@ export default function Home() {
             }
 
             if (!targetServerId) {
-              toolResultsText += `\n- ${fc.name}: 도구를 찾을 수 없습니다.\n`;
+              toolResultsText += `\n\n❌ **도구 실행 실패**\n요청하신 "${fc.name}" 도구를 찾을 수 없습니다.\n`;
               continue;
             }
+
+            // 도구 호출 정보 로그
+            console.log('🔧 MCP Tool Call:', {
+              toolName: fc.name,
+              arguments: fc.args,
+              serverId: targetServerId
+            });
 
             // MCP 도구 실행
             const executeRes = await fetch('/api/mcp/tools/execute', {
@@ -246,31 +291,58 @@ export default function Home() {
 
             const executeData = await executeRes.json();
 
+            // 도구 실행 결과 로그
+            console.log('🔧 MCP Tool Result:', executeData);
+
             if (!executeRes.ok || executeData.isError) {
-              toolResultsText += `\n- ${fc.name}: 오류 - ${executeData.error || '실행 실패'}\n`;
+              toolResultsText += `\n\n❌ **${fc.name} 실행 실패**\n${executeData.error || '알 수 없는 오류가 발생했습니다.'}\n`;
             } else {
-              // 도구 실행 결과를 텍스트로 변환
-              const resultText = executeData.content
-                ?.map((c: any) => c.text || JSON.stringify(c))
-                .join('\n') || JSON.stringify(executeData);
-              toolResultsText += `\n- ${fc.name}: ${resultText}\n`;
+              // 도구 실행 결과를 읽기 쉬운 텍스트로 변환
+              let resultText = '';
+              
+              if (executeData.content && Array.isArray(executeData.content)) {
+                // content 배열 처리
+                for (const item of executeData.content) {
+                  if (item.type === 'text' && item.text) {
+                    // 텍스트 콘텐츠를 그대로 사용 (JSON 파싱 시도하지 않음)
+                    resultText += item.text;
+                  } else if (item.text) {
+                    resultText += item.text;
+                  } else {
+                    // 다른 타입의 데이터는 JSON으로 표시하되 읽기 쉽게
+                    const jsonData = typeof item === 'string' ? item : JSON.stringify(item, null, 2);
+                    resultText += jsonData;
+                  }
+                }
+              } else {
+                // content가 없으면 전체 결과를 표시
+                resultText = typeof executeData === 'string' ? executeData : JSON.stringify(executeData, null, 2);
+              }
+              
+              // 결과 텍스트 정리 (앞뒤 공백 제거)
+              resultText = resultText.trim();
+              
+              // 도구 이름 없이 결과만 자연스럽게 표시
+              toolResultsText += `\n\n${resultText}\n`;
             }
           } catch (err) {
-            toolResultsText += `\n- ${fc.name}: 실행 중 오류 발생\n`;
+            toolResultsText += `\n\n❌ **${fc.name} 실행 중 오류 발생**\n${err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.'}\n`;
           }
         }
 
         // 도구 실행 결과를 포함한 최종 응답
         const finalText = (response.text() || '') + toolResultsText;
+        // thinking 메시지를 실제 응답으로 교체
         updateCurrentChatMessages([
-          ...newMessages,
+          ...newMessages.slice(0, -1),
           { role: 'assistant', content: finalText },
         ]);
       } else {
         // 일반 텍스트 응답
         const responseText = response.text();
+        // thinking 메시지를 실제 응답으로 교체
         updateCurrentChatMessages([
-          ...newMessages,
+          ...newMessages.slice(0, -1),
           { role: 'assistant', content: responseText },
         ]);
       }
@@ -278,11 +350,8 @@ export default function Home() {
       console.error('Error:', err);
       setError(err instanceof Error ? err.message : '메시지 전송 중 오류가 발생했습니다.');
       
-      // 오류 발생 시 빈 assistant 메시지 제거
-      const currentMessages = chats.find(c => c.id === currentChatId)?.messages || [];
-      if (currentMessages.length > messages.length) {
-        updateCurrentChatMessages(currentMessages.slice(0, -1));
-      }
+      // 오류 발생 시 thinking 메시지 제거
+      updateCurrentChatMessages(newMessages.slice(0, -1));
     } finally {
       setIsLoading(false);
     }
@@ -348,19 +417,18 @@ export default function Home() {
                 >
                   {message.role === 'user' ? (
                     <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                  ) : message.content === '...' ? (
+                    <div className="flex items-center gap-1 text-2xl">
+                      <span className="animate-pulse" style={{ animationDelay: '0ms' }}>.</span>
+                      <span className="animate-pulse" style={{ animationDelay: '200ms' }}>.</span>
+                      <span className="animate-pulse" style={{ animationDelay: '400ms' }}>.</span>
+                    </div>
                   ) : (
                     <MarkdownRenderer content={message.content} />
                   )}
                 </div>
               </div>
             ))
-          )}
-          {isLoading && messages[messages.length - 1]?.content === '' && (
-            <div className="flex justify-start">
-              <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-md">
-                <Loader2 className="w-5 h-5 animate-spin text-gray-600 dark:text-gray-400" />
-              </div>
-            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
